@@ -1,354 +1,404 @@
 import sys
 from enum import Enum
 
-class TOKEN_TYPE(Enum):
-    NONE = -2
-    EOF = -1
-    STRING = 0
-    NUMBER = 1
-    IDENTIFIER = 2
-    LEFT_PAREN = 3
-    RIGHT_PAREN = 4
-    LEFT_BRACE = 5
-    RIGHT_BRACE = 6
-    COMMA = 7
-    DOT = 8
-    MINUS = 9
-    PLUS = 10
-    SEMICOLON = 11
-    STAR = 12
-    SLASH = 13
-    EQUAL_EQUAL = 14
-    EQUAL = 15
-    BANG_EQUAL = 16
-    BANG = 17
-    LESS_EQUAL = 18
-    LESS = 19
-    GREATER_EQUAL = 20
-    GREATER = 21
-    AND = 22
-    OR = 23
-    IF = 24
+def literal_for_token(value):
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return value
+    return str(value).lower()
+
+def literal_for_parser(value):
+    if value is None:
+        return "nil"
+    return str(value).lower()
+
+class TokenType(Enum):
+    # Single-character tokens.
+    LEFT_PAREN = 1
+    RIGHT_PAREN = 2
+    LEFT_BRACE = 3
+    RIGHT_BRACE = 4
+    COMMA = 5
+    DOT = 6
+    MINUS = 7
+    PLUS = 8
+    SEMICOLON = 9
+    SLASH = 10
+    STAR = 11
+    # One or two character tokens.
+    BANG = 12
+    BANG_EQUAL = 13
+    EQUAL = 14
+    EQUAL_EQUAL = 15
+    GREATER = 16
+    GREATER_EQUAL = 17
+    LESS = 18
+    LESS_EQUAL = 19
+    # Literals.
+    IDENTIFIER = 20
+    STRING = 21
+    NUMBER = 22
+    # Keywords.
+    AND = 23
+    CLASS = 24
     ELSE = 25
-    FOR = 26
-    WHILE = 27
-    TRUE = 28
-    FALSE = 29
-    CLASS = 30
-    SUPER = 31
-    THIS = 32
-    VAR = 33
-    FUN = 34
-    RETURN = 35
-    PRINT = 36
-    NIL = 37
+    FALSE = 26
+    FUN = 27
+    FOR = 28
+    IF = 29
+    NIL = 30
+    OR = 31
+    PRINT = 32
+    RETURN = 33
+    SUPER = 34
+    THIS = 35
+    TRUE = 36
+    VAR = 37
+    WHILE = 38
+    EOF = 39
+
+    def __str__(self):
+        return super().__str__().split(".")[1]
 
 class Token:
-    def __init__(self, type: TOKEN_TYPE, name: str, value):
-        self.type = type
-        self.name = name
-        self.value = value
+    def __init__(self, token_type, lexeme, literal, line):
+        self.token_type = token_type
+        self.lexeme = lexeme
+        self.literal = literal
+        self.line = line
 
     def __str__(self):
-        return f"{self.type.name} {self.name} {self.value}"
+        return f"{self.token_type} {self.lexeme} {literal_for_token(self.literal)}"
 
-class Lexer:
-    def __init__(self, program: str):
-        self.program = program
-        self.size = len(self.program)
-        self.i = 0
+    def __repr__(self):
+        return self.__str__()
+
+class Scanner:
+    def __init__(self, source, interpreter):
+        self.source = source
+        self.tokens = []
+        self.start = 0
+        self.current = 0
         self.line = 1
-        self.current_char = self.program[self.i] if self.size > 0 else ""
-        self.had_error = False
+        self.interpreter = interpreter
+        self.keywords = {
+            "and": TokenType.AND,
+            "class": TokenType.CLASS,
+            "else": TokenType.ELSE,
+            "false": TokenType.FALSE,
+            "for": TokenType.FOR,
+            "fun": TokenType.FUN,
+            "if": TokenType.IF,
+            "nil": TokenType.NIL,
+            "or": TokenType.OR,
+            "print": TokenType.PRINT,
+            "return": TokenType.RETURN,
+            "super": TokenType.SUPER,
+            "this": TokenType.THIS,
+            "true": TokenType.TRUE,
+            "var": TokenType.VAR,
+            "while": TokenType.WHILE,
+        }
+
+    def is_at_end(self):
+        return self.current >= len(self.source)
+
+    def scan_tokens(self):
+        while not self.is_at_end():
+            self.start = self.current
+            self.scan_token()
+        self.tokens.append(Token(TokenType.EOF, "", None, self.line))
+        return self.tokens
+
+    def scan_token(self):
+        c = self.advance()
+        match c:
+            case "(":
+                self.add_token(TokenType.LEFT_PAREN)
+            case ")":
+                self.add_token(TokenType.RIGHT_PAREN)
+            case "{":
+                self.add_token(TokenType.LEFT_BRACE)
+            case "}":
+                self.add_token(TokenType.RIGHT_BRACE)
+            case ",":
+                self.add_token(TokenType.COMMA)
+            case ".":
+                self.add_token(TokenType.DOT)
+            case "-":
+                self.add_token(TokenType.MINUS)
+            case "+":
+                self.add_token(TokenType.PLUS)
+            case ";":
+                self.add_token(TokenType.SEMICOLON)
+            case "*":
+                self.add_token(TokenType.STAR)
+            case "!":
+                token_type = TokenType.BANG_EQUAL if self.match("=") else TokenType.BANG
+                self.add_token(token_type)
+            case "=":
+                token_type = TokenType.EQUAL_EQUAL if self.match("=") else TokenType.EQUAL
+                self.add_token(token_type)
+            case "<":
+                token_type = TokenType.LESS_EQUAL if self.match("=") else TokenType.LESS
+                self.add_token(token_type)
+            case ">":
+                token_type = TokenType.GREATER_EQUAL if self.match("=") else TokenType.GREATER
+                self.add_token(token_type)
+            case "/":
+                if self.match("/"):
+                    while self.peek() != "\n" and not self.is_at_end():
+                        self.advance()
+                else:
+                    self.add_token(TokenType.SLASH)
+            case " " | "\r" | "\t":
+                pass
+            case "\n":
+                self.line += 1
+            case '"':
+                self.string()
+            case _:
+                if c.isdigit():
+                    self.number()
+                elif c.isalpha() or c == "_":
+                    self.identifier()
+                else:
+                    self.interpreter.error(self.line, f"Unexpected character: {c}")
+
+    def identifier(self):
+        while self.peek().isalnum() or self.peek() == "_":
+            self.advance()
+        text = self.source[self.start : self.current]
+        token_type = self.keywords.get(text, TokenType.IDENTIFIER)
+        self.add_token(token_type)
 
     def advance(self):
-        self.i += 1
-        if self.i < self.size:
-            self.current_char = self.program[self.i]
-        else:
-            self.current_char = ""
+        self.current += 1
+        return self.source[self.current - 1]
 
-    def skip_whitespace(self):
-        while self.i < self.size and self.current_char.isspace():
-            if self.current_char == "\n":
+    def number(self):
+        while self.peek().isdigit():
+            self.advance()
+        if self.peek() == "." and self.peek_next().isdigit():
+            self.advance()
+            while self.peek().isdigit():
+                self.advance()
+        self.add_token(TokenType.NUMBER, float(self.source[self.start : self.current]))
+
+    def peek_next(self):
+        if self.current + 1 >= len(self.source):
+            return "\0"
+        return self.source[self.current + 1]
+
+    def peek(self):
+        if self.is_at_end():
+            return "\0"
+        return self.source[self.current]
+
+    def add_token(self, token_type, literal=None):
+        text = self.source[self.start : self.current]
+        self.tokens.append(Token(token_type, text, literal, self.line))
+
+    def string(self):
+        while self.peek() != '"' and not self.is_at_end():
+            if self.peek() == "\n":
                 self.line += 1
             self.advance()
 
-    def next_token(self) -> Token:
-        self.skip_whitespace()
-        if self.i >= self.size:
-            return Token(TOKEN_TYPE.EOF, "", "null")
+        if self.is_at_end():
+            self.interpreter.error(self.line, "Unterminated string.")
+            return
 
-        char = self.current_char
-
-        if char == "(":
-            return self.advance_with(Token(TOKEN_TYPE.LEFT_PAREN, "(", "null"))
-        elif char == ")":
-            return self.advance_with(Token(TOKEN_TYPE.RIGHT_PAREN, ")", "null"))
-        elif char == "{":
-            return self.advance_with(Token(TOKEN_TYPE.LEFT_BRACE, "{", "null"))
-        elif char == "}":
-            return self.advance_with(Token(TOKEN_TYPE.RIGHT_BRACE, "}", "null"))
-        elif char == ",":
-            return self.advance_with(Token(TOKEN_TYPE.COMMA, ",", "null"))
-        elif char == ".":
-            return self.advance_with(Token(TOKEN_TYPE.DOT, ".", "null"))
-        elif char == "-":
-            return self.advance_with(Token(TOKEN_TYPE.MINUS, "-", "null"))
-        elif char == "+":
-            return self.advance_with(Token(TOKEN_TYPE.PLUS, "+", "null"))
-        elif char == ";":
-            return self.advance_with(Token(TOKEN_TYPE.SEMICOLON, ";", "null"))
-        elif char == "*":
-            return self.advance_with(Token(TOKEN_TYPE.STAR, "*", "null"))
-        elif char == "/":
-            self.advance()
-            if self.current_char == "/":
-                while self.current_char != "\n" and self.i < self.size:
-                    self.advance()
-                return self.next_token()  # Skip to next token after comment
-            return Token(TOKEN_TYPE.SLASH, "/", "null")
-        elif char == "=":
-            self.advance()
-            if self.current_char == "=":
-                return self.advance_with(Token(TOKEN_TYPE.EQUAL_EQUAL, "==", "null"))
-            return Token(TOKEN_TYPE.EQUAL, "=", "null")
-        elif char == "!":
-            self.advance()
-            if self.current_char == "=":
-                return self.advance_with(Token(TOKEN_TYPE.BANG_EQUAL, "!=", "null"))
-            return Token(TOKEN_TYPE.BANG, "!", "null")
-        elif char == "<":
-            self.advance()
-            if self.current_char == "=":
-                return self.advance_with(Token(TOKEN_TYPE.LESS_EQUAL, "<=", "null"))
-            return Token(TOKEN_TYPE.LESS, "<", "null")
-        elif char == ">":
-            self.advance()
-            if self.current_char == "=":
-                return self.advance_with(Token(TOKEN_TYPE.GREATER_EQUAL, ">=", "null"))
-            return Token(TOKEN_TYPE.GREATER, ">", "null")
-        elif char == '"':
-            return self.next_string()
-        elif char.isalpha() or char == "_":
-            return self.next_id()
-        elif char.isdigit():
-            return self.next_number()
-        else:
-            print(f"[line {self.line}] Error: Unexpected character: {char}", file=sys.stderr)
-            self.had_error = True
-            self.advance()
-            return Token(TOKEN_TYPE.NONE, "", "null")
-    
-    def advance_with(self, token: Token) -> Token:
+        # The closing ".
         self.advance()
-        return token
 
-    def next_id(self) -> Token:
-        id_str = ""
-        while self.i < self.size and (self.current_char.isalnum() or self.current_char == "_"):
-            id_str += self.current_char
-            self.advance()
+        # Trim the surrounding quotes.
+        value = self.source[self.start + 1 : self.current - 1]
+        self.add_token(TokenType.STRING, value)
+
+    def match(self, expected):
+        if self.is_at_end():
+            return False
+        if self.source[self.current] != expected:
+            return False
+        self.current += 1
+        return True
+
+class LoxInterpreter:
+    def __init__(self, file_contents):
+        self.file_contents = file_contents
+        self.had_error = False
+
+    def run(self, tokenize, parse):
+        scanner = Scanner(self.file_contents, self)
+        tokens = scanner.scan_tokens()
         
-        match id_str:
-            case "and": return Token(TOKEN_TYPE.AND, id_str, "null")
-            case "or": return Token(TOKEN_TYPE.OR, id_str, "null")
-            case "if": return Token(TOKEN_TYPE.IF, id_str, "null")
-            case "else": return Token(TOKEN_TYPE.ELSE, id_str, "null")
-            case "for": return Token(TOKEN_TYPE.FOR, id_str, "null")
-            case "while": return Token(TOKEN_TYPE.WHILE, id_str, "null")
-            case "true": return Token(TOKEN_TYPE.TRUE, id_str, "null")
-            case "false": return Token(TOKEN_TYPE.FALSE, id_str, "null")
-            case "class": return Token(TOKEN_TYPE.CLASS, id_str, "null")
-            case "super": return Token(TOKEN_TYPE.SUPER, id_str, "null")
-            case "this": return Token(TOKEN_TYPE.THIS, id_str, "null")
-            case "var": return Token(TOKEN_TYPE.VAR, id_str, "null")
-            case "fun": return Token(TOKEN_TYPE.FUN, id_str, "null")
-            case "return": return Token(TOKEN_TYPE.RETURN, id_str, "null")
-            case "print": return Token(TOKEN_TYPE.PRINT, id_str, "null")
-            case "nil": return Token(TOKEN_TYPE.NIL, id_str, "null")
+        if tokenize:
+            for token in tokens:
+                print(token)
         
-        return Token(TOKEN_TYPE.IDENTIFIER, id_str, "null")
+        if parse:
+            parser = Parser(tokens, self)
+            try:    
+                expression = parser.parse()
+                if not self.had_error and expression is not None:
+                    print(expression)
+            except ParseError:
+                pass
 
-    def next_string(self) -> Token:
-        string_value = ""
-        self.advance()  # Skip the opening quote
-        start_line = self.line
-        while self.current_char != '"':
-            if self.i >= self.size:
-                print(f"[line {start_line}] Error: Unterminated string.", file=sys.stderr)
-                self.had_error = True
-                return Token(TOKEN_TYPE.NONE, "", "null")
-            if self.current_char == "\n":
-                self.line += 1
-            string_value += self.current_char
-            self.advance()
-        self.advance()  # Skip the closing quote
-        return Token(TOKEN_TYPE.STRING, f'"{string_value}"', string_value)
+        if self.had_error:
+            sys.exit(65)
 
-    def next_number(self) -> Token:
-        num_str = ""
-        dot = False
-        while self.i < self.size:
-            if self.current_char == ".":
-                if dot:
-                    break  # Only one dot allowed
-                dot = True
-            elif not self.current_char.isdigit():
-                break
-            num_str += self.current_char
-            self.advance()
-        return Token(TOKEN_TYPE.NUMBER, num_str, float(num_str) if num_str else 0.0)
+    def set_error(self):
+        self.had_error = True
 
-class Expression:
-    pass
+    def error(self, line_number, message):
+        self.report(line_number, "", message)
 
-class Literal(Expression):
-    def __init__(self, value):
-        self.value = value
-
-    def __str__(self):
-        if isinstance(self.value, str):
-            return self.value
-        elif self.value is True:
-            return "true"
-        elif self.value is False:
-            return "false"
-        elif self.value is None:
-            return "nil"
-        else:
-            return str(self.value)
-
-class Unary(Expression):
-    def __init__(self, operator, right):
-        self.operator = operator
-        self.right = right
-
-    def __str__(self):
-        return f"({self.operator.name} {self.right})"
-
-class Group(Expression):
-    def __init__(self, expression):
-        self.expression = expression
-
-    def __str__(self):
-        return f"(group {self.expression})"
+    def report(self, line, where, message):
+        print(f"[line {line}] Error{where}: {message}", file=sys.stderr)
+        self.set_error()
 
 class Parser:
-    def __init__(self, lexer):
-        self.lexer = lexer
-        self.current_token = self.lexer.next_token()
+    def __init__(self, tokens, interpreter):
+        self.tokens = tokens
+        self.current = 0
+        self.interpreter = interpreter
 
     def parse(self):
-        return self.expression()
+        try:
+            return self.expression()
+        except ParseError:
+            return None
 
     def expression(self):
-        if self.current_token.type == TOKEN_TYPE.LEFT_PAREN:
-            self.consume(TOKEN_TYPE.LEFT_PAREN)
-            expr = self.expression()
-            self.consume(TOKEN_TYPE.RIGHT_PAREN)
-            return Group(expr)
-        elif self.current_token.type in [TOKEN_TYPE.NUMBER, TOKEN_TYPE.STRING, TOKEN_TYPE.TRUE, TOKEN_TYPE.FALSE, TOKEN_TYPE.NIL]:
-            return self.literal()
-        else:
-            raise SyntaxError(f"Unexpected token: {self.current_token}")
+        return self.equality()
+
+    def equality(self):
+        expr = self.comparison()
+        while self.match(TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL):
+            operator = self.previous()
+            right = self.comparison()
+            expr = Binary(expr, operator, right)
+        return expr
+
+    def match(self, *types):
+        for token_type in types:
+            if self.check(token_type):
+                self.advance()
+                return True
+        return False
+
+    def check(self, token_type):
+        if self.is_at_end():
+            return False
+        return self.peek().token_type == token_type
+
+    def is_at_end(self):
+        return self.peek().token_type == TokenType.EOF
+
+    def peek(self):
+        return self.tokens[self.current]
+
+    def advance(self):
+        if not self.is_at_end():
+            self.current += 1
+        return self.previous()
+
+    def previous(self):
+        return self.tokens[self.current - 1]
+
+    def comparison(self):
+        expr = self.term()
+        while self.match(TokenType.GREATER, TokenType.GREATER_EQUAL, TokenType.LESS, TokenType.LESS_EQUAL):
+            operator = self.previous()
+            right = self.term()
+            expr = Binary(expr, operator, right)
+        return expr
+
+    def term(self):
+        expr = self.factor()
+        while self.match(TokenType.MINUS, TokenType.PLUS):
+            operator = self.previous()
+            right = self.factor()
+            expr = Binary(expr, operator, right)
+        return expr
+
+    def factor(self):
+        expr = self.unary()
+        while self.match(TokenType.SLASH, TokenType.STAR):
+            operator = self.previous()
+            right = self.unary()
+            expr = Binary(expr, operator, right)
+        return expr
 
     def unary(self):
-        if self.current_token.type in [TOKEN_TYPE.MINUS, TOKEN_TYPE.BANG]:
-            operator = self.current_token
-            self.consume(self.current_token.type)
+        if self.match(TokenType.BANG, TokenType.MINUS):
+            operator = self.previous()
             right = self.unary()
             return Unary(operator, right)
         return self.primary()
-    
+
     def primary(self):
-        if self.current_token.type == TOKEN_TYPE.LEFT_PAREN:
-            self.consume(TOKEN_TYPE.LEFT_PAREN)
+        if self.match(TokenType.FALSE):
+            return Literal(False)
+        if self.match(TokenType.TRUE):
+            return Literal(True)
+        if self.match(TokenType.NIL):
+            return Literal(None)
+        if self.match(TokenType.NUMBER, TokenType.STRING):
+            return Literal(self.previous().literal)
+        if self.match(TokenType.LEFT_PAREN):
             expr = self.expression()
-            self.consume(TOKEN_TYPE.RIGHT_PAREN)
-            return Group(expr)
-        elif self.current_token.type in [TOKEN_TYPE.NUMBER, TOKEN_TYPE.STRING, TOKEN_TYPE.TRUE, TOKEN_TYPE.FALSE, TOKEN_TYPE.NIL]:
-            return self.literal()
-        else:
-            raise SyntaxError(f"Unexpected token: {self.current_token}")
-
-    def literal(self):
-        if self.current_token.type == TOKEN_TYPE.NUMBER:
-            value = self.current_token.value
-        elif self.current_token.type == TOKEN_TYPE.STRING:
-            value = self.current_token.value
-        elif self.current_token.type == TOKEN_TYPE.TRUE:
-            value = True
-        elif self.current_token.type == TOKEN_TYPE.FALSE:
-            value = False
-        elif self.current_token.type == TOKEN_TYPE.NIL:
-            value = None
-        else:
-            raise SyntaxError(f"Unexpected token: {self.current_token}")
+            self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.")
+            return Grouping(expr)
         
-        self.consume(self.current_token.type)
-        return Literal(value)
+        raise self.error(self.peek(), "Expect expression.")
 
-    def consume(self, token_type):
-        if self.current_token.type == token_type:
-            self.current_token = self.lexer.next_token()
-        else:
-            raise SyntaxError(f"Expected {token_type}, but got {self.current_token.type}")
+    def consume(self, token_type, message):
+        if self.check(token_type):
+            return self.advance()
+        raise self.error(self.peek(), message)
 
-def parse(file_contents):
-    lexer = Lexer(file_contents)
-    parser = Parser(lexer)
-    
-    try:
-        expr = parser.parse()
-        print(str(expr))
-    except SyntaxError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        exit(65)
+    def error(self, token, message):
+        self.interpreter.error(token.line, message)
+        return ParseError()
 
-def tokenize(file_contents):
-    lexer = Lexer(file_contents)
-    had_error = False
-    
-    while True:
-        token = lexer.next_token()
-        if token.type == TOKEN_TYPE.NONE:
-            had_error = True
-            continue  # Skip printing NONE tokens
-        print(token)  # This will use the __str__ method of the Token class
-        if token.type == TOKEN_TYPE.EOF:
-            break
-        if lexer.had_error:
-            had_error = True
-    
-    # Ensure EOF is printed even if we encountered an error
-    if token.type != TOKEN_TYPE.EOF:
-        print(Token(TOKEN_TYPE.EOF, "", "null"))
-    
-    return 65 if had_error else 0
+class ParseError(Exception):
+    pass
+
+def Binary(left, operator, right):
+    return f"({operator.lexeme} {left} {right})"
+
+def Unary(operator, right):
+    return f"({operator.lexeme} {right})"
+
+def Literal(value):
+    return literal_for_parser(value)
+
+def Grouping(expression):
+    return f"(group {expression})"
 
 def main():
+    print("Logs from your program will appear here!", file=sys.stderr)
+    
     if len(sys.argv) < 3:
         print("Usage: ./your_program.sh <command> <filename>", file=sys.stderr)
-        exit(65)
-    
+        sys.exit(1)
+
     command = sys.argv[1]
     filename = sys.argv[2]
-    
-    try:
-        with open(filename) as file:
-            file_contents = file.read()
-    except FileNotFoundError:
-        print(f"Error: File '{filename}' not found.", file=sys.stderr)
-        exit(65)
-    
-    if command == "parse":
-        exit(parse(file_contents))
-    elif command == "tokenize":
-        exit(tokenize(file_contents))
+    commands = ["tokenize", "parse"]
 
-    print("Invalid command.", file=sys.stderr)
-    exit(65)
+    if command not in commands:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(filename) as file:
+        file_contents = file.read()
+        interpreter = LoxInterpreter(file_contents)
+        interpreter.run(command == "tokenize", command == "parse")
 
 if __name__ == "__main__":
     main()
